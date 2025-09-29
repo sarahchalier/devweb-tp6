@@ -1,37 +1,31 @@
 import express from "express";
+import { initDb } from "../database/database.mjs";
+import crypto from "crypto";
+
 const router = express.Router();
 
-let links = {};
-let count = 0;
+router.get("/", async (req, res) => {
+  const db = await initDb();
+  const result = await db.get("SELECT COUNT(*) as count FROM links");
+  res.json({ count: result.count });
+});
 
-router.get("/", (req, res) => res.json({ count }));
-
-router.post("/", (req, res) => {
+router.post("/", async (req, res) => {
   const { url } = req.body;
-  if (!url || !/^https?:\/\/.+$/.test(url)) return res.status(400).json({ error: "Invalid URL" });
-  const short = Math.random().toString(36).substring(2, 8);
-  links[short] = { url, created: new Date(), visits: 0 };
-  count++;
-  res.json({ short, url });
-});
+  if (!url) return res.status(400).json({ error: "Missing URL" });
 
-router.get("/status/:url", (req, res) => {
-  const { url } = req.params;
-  if (!links[url]) return res.status(404).json({ error: "Not Found" });
-  const { created, visits } = links[url];
-  res.json({ url: links[url].url, created, visits });
-});
+  const db = await initDb();
+  const short = crypto.randomBytes(3).toString("hex");
+  const secret = crypto.randomBytes(6).toString("hex");
 
-router.get("/:url", (req, res) => {
-  const { url } = req.params;
-  if (!links[url]) return res.status(404).json({ error: "Not Found" });
-  links[url].visits++;
-  res.redirect(links[url].url);
-});
+  await db.run(
+    "INSERT INTO links (url, short, secret) VALUES (?, ?, ?)",
+    url,
+    short,
+    secret
+  );
 
-router.get("/error", (req, res) => {
-  throw new Error("Erreur volontaire");
+  res.json({ url, short, secret });
 });
 
 export default router;
-

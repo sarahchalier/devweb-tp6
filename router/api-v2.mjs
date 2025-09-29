@@ -1,52 +1,68 @@
 import express from "express";
-import { db } from "../database/database.mjs";
+import { initDb } from "../database/database.mjs";
+import crypto from "crypto";
 
 const router = express.Router();
 
-router.get("/", (req, res) => {
-  db.all("SELECT short, url, visits, created FROM links", [], (err, rows) => {
-    if (err) return res.status(500).send(err.message);
+router.get("/", async (req, res) => {
+  const db = await initDb();
+  const links = await db.all("SELECT * FROM links");
 
-    res.format({
-      "application/json": () => res.json(rows),
-      "text/html": () => res.render("root", { links: rows }),
-      default: () => res.status(406).send("Not Acceptable")
-    });
+  res.format({
+    "application/json": () => res.json({ links }),
+    "text/html": () => res.render("root", { links }),
+    default: () => res.status(406).send("Not Acceptable")
   });
 });
 
-router.post("/", (req, res) => {
+router.post("/", async (req, res) => {
   const { url } = req.body;
-  if (!url || !/^https?:\/\/.+$/.test(url)) return res.status(400).json({ error: "Invalid URL" });
-  const short = Math.random().toString(36).substring(2, 8);
-  const created = new Date().toISOString();
+  if (!url) return res.status(400).json({ error: "Missing URL" });
 
-  db.run(
-    "INSERT INTO links(short, url, created, visits) VALUES(?, ?, ?, 0)",
-    [short, url, created],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.format({
-        "application/json": () => res.json({ short, url, created, visits: 0 }),
-        "text/html": () => res.redirect("/api-v2")
-      });
-    }
-  );
+  const db = await initDb();
+  const short = crypto.randomBytes(3).toString("hex");
+  const secret = crypto.randomBytes(6).toString("hex");
+
+  await db.run("INSERT INTO links (url, short, secret) VALUES (?, ?, ?)", url, short, secret);
+
+  res.format({
+    "application/json": () => res.json({ url, short, secret }),
+    "text/html": async () => {
+      const links = await db.all("SELECT * FROM links");
+      res.render("root", { links });
+    },
+    default: () => res.status(406).send("Not Acceptable")
+  });
 });
 
-router.get("/:url", (req, res) => {
-  const { url } = req.params;
-  db.get("SELECT * FROM links WHERE short = ?", [url], (err, row) => {
-    if (err) return res.status(500).send(err.message);
-    if (!row) return res.status(404).send("Not Found");
+router.get("/:short", async (req, res) => {
+  const db = await initDb();
+  const { short } = req.params;
+  const link = await db.get("SELECT * FROM links WHERE short = ?", short);
+  if (!link) return res.status(404).json({ error: "Link not found" });
 
-    db.run("UPDATE links SET visits = visits + 1 WHERE short = ?", [url]);
+  if (req.accepts("json") && !req.accepts("html")) {
+    return res.json(link);
+  }
 
-    res.format({
-      "application/json": () => res.json(row),
-      "text/html": () => res.redirect(row.url)
-    });
-  });
+  await db.run("UPDATE links SET visits = visits + 1 WHERE id = ?", link.id);
+  res.redirect(link.url);
+});
+
+router.delete("/:short", async (req, res) => {
+  const db = await initDb();
+  const { short } = req.params;
+  const key = req.header("X-API-Key");
+
+  if (!key) return res.status(401).json({ error: "Missing X-API-Key" });
+
+  const link = await db.get("SELECT * FROM links WHERE short = ?", short);
+  if (!link) return res.status(404).json({ error: "Link not found" });
+
+  if (link.secret !== key) return res.status(403).json({ error: "Forbidden" });
+
+  await db.run("DELETE FROM links WHERE id = ?", link.id);
+  res.status(200).json({ success: true });
 });
 
 export default router;
