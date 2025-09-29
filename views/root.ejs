@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>URL Shortener v2</title>
+</head>
+<body>
+    <h1>URL Shortener</h1>
+    <form method="post" action="/api-v2/" id="submit-link">
+        <label for="url">Type the URL to shorten</label>
+        <input name="url" id="url" type="url" placeholder="https://perdu.com" />
+        <button type="submit">Submit</button>
+    </form>
+
+    <ul>
+        <% links.forEach(link => { %>
+        <li>
+            <a href="/api-v2/<%= link.short %>"><%= link.short %></a> → <%= link.url %>
+            (visites : <%= link.visits %>)
+        </li>
+        <% }) %>
+    </ul>
+</body>
+</html>
